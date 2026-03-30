@@ -34,6 +34,20 @@ pub struct SetupNetwork {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub outbound_addr6: Option<Ipv6Addr>,
+    /// enable SNAT for IPv4 traffic (default: true)
+    #[serde(default = "default_snat_ipv4")]
+    pub snat_ipv4: bool,
+    /// enable SNAT for IPv6 traffic (default: true)
+    #[serde(default = "default_snat_ipv6")]
+    pub snat_ipv6: bool,
+}
+
+fn default_snat_ipv4() -> bool {
+    true
+}
+
+fn default_snat_ipv6() -> bool {
+    true
 }
 
 #[derive(Debug)]

@@ -23,6 +23,7 @@ pub mod netlink_route;
 
 pub mod plugin;
 pub mod sysctl;
+pub mod tc;
 pub mod vlan;
 
 impl types::NetworkOptions {

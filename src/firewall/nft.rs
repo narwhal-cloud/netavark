@@ -392,79 +392,83 @@ impl firewall::FirewallDriver for Nftables {
                 // Use appropriate outbound address based on subnet type
                 match subnet {
                     IpNet::V4(_) => {
-                        if let Some(addr4) = network_setup.outbound_addr4 {
-                            log::trace!("Creating IPv4 SNAT rule with outbound address {addr4}");
-                            batch.add(make_rule(
-                                chain.clone(),
-                                Cow::Owned(vec![
-                                    get_subnet_match(
-                                        &multicast_address,
-                                        "daddr",
-                                        stmt::Operator::NEQ,
-                                    ),
-                                    stmt::Statement::SNAT(Some(stmt::NAT {
-                                        addr: Some(expr::Expression::String(
-                                            addr4.to_string().into(),
-                                        )),
-                                        family: Some(stmt::NATFamily::IP),
-                                        port: None,
-                                        flags: None,
-                                    })),
-                                ]),
-                            ));
-                        } else {
-                            log::trace!(
-                                "No IPv4 outbound address set, using default MASQUERADE rule"
-                            );
-                            batch.add(make_rule(
-                                chain.clone(),
-                                Cow::Owned(vec![
-                                    get_subnet_match(
-                                        &multicast_address,
-                                        "daddr",
-                                        stmt::Operator::NEQ,
-                                    ),
-                                    stmt::Statement::Masquerade(None),
-                                ]),
-                            ));
+                        if network_setup.snat_ipv4 {
+                            if let Some(addr4) = network_setup.outbound_addr4 {
+                                log::trace!("Creating IPv4 SNAT rule with outbound address {addr4}");
+                                batch.add(make_rule(
+                                    chain.clone(),
+                                    Cow::Owned(vec![
+                                        get_subnet_match(
+                                            &multicast_address,
+                                            "daddr",
+                                            stmt::Operator::NEQ,
+                                        ),
+                                        stmt::Statement::SNAT(Some(stmt::NAT {
+                                            addr: Some(expr::Expression::String(
+                                                addr4.to_string().into(),
+                                            )),
+                                            family: Some(stmt::NATFamily::IP),
+                                            port: None,
+                                            flags: None,
+                                        })),
+                                    ]),
+                                ));
+                            } else {
+                                log::trace!(
+                                    "No IPv4 outbound address set, using default MASQUERADE rule"
+                                );
+                                batch.add(make_rule(
+                                    chain.clone(),
+                                    Cow::Owned(vec![
+                                        get_subnet_match(
+                                            &multicast_address,
+                                            "daddr",
+                                            stmt::Operator::NEQ,
+                                        ),
+                                        stmt::Statement::Masquerade(None),
+                                    ]),
+                                ));
+                            }
                         }
                     }
                     IpNet::V6(_) => {
-                        if let Some(addr6) = network_setup.outbound_addr6 {
-                            log::trace!("Creating IPv6 SNAT rule with outbound address {addr6}");
-                            batch.add(make_rule(
-                                chain.clone(),
-                                Cow::Owned(vec![
-                                    get_subnet_match(
-                                        &multicast_address,
-                                        "daddr",
-                                        stmt::Operator::NEQ,
-                                    ),
-                                    stmt::Statement::SNAT(Some(stmt::NAT {
-                                        addr: Some(expr::Expression::String(
-                                            addr6.to_string().into(),
-                                        )),
-                                        family: Some(stmt::NATFamily::IP6),
-                                        port: None,
-                                        flags: None,
-                                    })),
-                                ]),
-                            ));
-                        } else {
-                            log::trace!(
-                                "No IPv6 outbound address set, using default MASQUERADE rule"
-                            );
-                            batch.add(make_rule(
-                                chain.clone(),
-                                Cow::Owned(vec![
-                                    get_subnet_match(
-                                        &multicast_address,
-                                        "daddr",
-                                        stmt::Operator::NEQ,
-                                    ),
-                                    stmt::Statement::Masquerade(None),
-                                ]),
-                            ));
+                        if network_setup.snat_ipv6 {
+                            if let Some(addr6) = network_setup.outbound_addr6 {
+                                log::trace!("Creating IPv6 SNAT rule with outbound address {addr6}");
+                                batch.add(make_rule(
+                                    chain.clone(),
+                                    Cow::Owned(vec![
+                                        get_subnet_match(
+                                            &multicast_address,
+                                            "daddr",
+                                            stmt::Operator::NEQ,
+                                        ),
+                                        stmt::Statement::SNAT(Some(stmt::NAT {
+                                            addr: Some(expr::Expression::String(
+                                                addr6.to_string().into(),
+                                            )),
+                                            family: Some(stmt::NATFamily::IP6),
+                                            port: None,
+                                            flags: None,
+                                        })),
+                                    ]),
+                                ));
+                            } else {
+                                log::trace!(
+                                    "No IPv6 outbound address set, using default MASQUERADE rule"
+                                );
+                                batch.add(make_rule(
+                                    chain.clone(),
+                                    Cow::Owned(vec![
+                                        get_subnet_match(
+                                            &multicast_address,
+                                            "daddr",
+                                            stmt::Operator::NEQ,
+                                        ),
+                                        stmt::Statement::Masquerade(None),
+                                    ]),
+                                ));
+                            }
                         }
                     }
                 }

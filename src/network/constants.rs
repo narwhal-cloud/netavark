@@ -26,6 +26,11 @@ pub const OPTION_VLAN: &str = "vlan";
 pub const OPTION_HOST_INTERFACE_NAME: &str = "host_interface_name";
 pub const OPTION_OUTBOUND_ADDR4: &str = "outbound_addr4";
 pub const OPTION_OUTBOUND_ADDR6: &str = "outbound_addr6";
+pub const OPTION_SNAT_IPV4: &str = "snat_ipv4";
+pub const OPTION_SNAT_IPV6: &str = "snat_ipv6";
+pub const OPTION_BANDWIDTH_RATE: &str = "bandwidth_rate";
+pub const OPTION_BANDWIDTH_BURST: &str = "bandwidth_burst";
+pub const OPTION_BANDWIDTH_LATENCY: &str = "bandwidth_latency";
 
 pub const MACVLAN_MODE_PRIVATE: &str = "private";
 pub const MACVLAN_MODE_VEPA: &str = "vepa";
@@ -51,6 +56,11 @@ pub const VALID_BRIDGE_OPTS: &[&str] = &[
     OPTION_NO_DEFAULT_ROUTE,
     OPTION_VRF,
     OPTION_VLAN,
+    OPTION_SNAT_IPV4,
+    OPTION_SNAT_IPV6,
+    OPTION_BANDWIDTH_RATE,
+    OPTION_BANDWIDTH_BURST,
+    OPTION_BANDWIDTH_LATENCY,
 ];
 
 // ValidMacVlanModes is the list of valid option constants for the macvlan driver.

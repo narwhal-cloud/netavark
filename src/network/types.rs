@@ -369,3 +369,13 @@ where
 
     deserializer.deserialize_any(MapOrVec(PhantomData))
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BandwidthOptions {
+    /// Rate is the maximum bandwidth in bits per second.
+    pub rate: u64,
+    /// Burst is the maximum number of bytes that can be sent at once.
+    pub burst: u64,
+    /// Latency is the maximum delay in milliseconds.
+    pub latency: u64,
+}

@@ -37,9 +37,11 @@ use netlink_packet_route::{
 use super::{
     constants::{
         ISOLATE_OPTION_FALSE, ISOLATE_OPTION_STRICT, ISOLATE_OPTION_TRUE,
-        NO_CONTAINER_INTERFACE_ERROR, OPTION_HOST_INTERFACE_NAME, OPTION_ISOLATE, OPTION_METRIC,
+        NO_CONTAINER_INTERFACE_ERROR, OPTION_BANDWIDTH_BURST, OPTION_BANDWIDTH_LATENCY,
+        OPTION_BANDWIDTH_RATE, OPTION_HOST_INTERFACE_NAME, OPTION_ISOLATE, OPTION_METRIC,
         OPTION_MODE, OPTION_MTU, OPTION_NO_DEFAULT_ROUTE, OPTION_OUTBOUND_ADDR4,
-        OPTION_OUTBOUND_ADDR6, OPTION_VLAN, OPTION_VRF, VALID_BRIDGE_OPTS,
+        OPTION_OUTBOUND_ADDR6, OPTION_SNAT_IPV4, OPTION_SNAT_IPV6, OPTION_VLAN, OPTION_VRF,
+        VALID_BRIDGE_OPTS,
     },
     core_utils::{self, get_ipam_addresses, is_using_systemd, join_netns, parse_option, CoreUtils},
     driver::{self, DriverInfo},
@@ -90,6 +92,12 @@ struct InternalData {
     outbound_addr4: Option<Ipv4Addr>,
     /// outbound IPv6 address for SNAT
     outbound_addr6: Option<Ipv6Addr>,
+    /// enable SNAT for IPv4 traffic
+    snat_ipv4: bool,
+    /// enable SNAT for IPv6 traffic
+    snat_ipv6: bool,
+    /// bandwidth limit options
+    bandwidth: Option<types::BandwidthOptions>,
 }
 
 pub struct Bridge<'a> {
@@ -105,6 +113,8 @@ struct CreateInterfacesResult {
     sysctl_writer: Option<sysctl::SysctlDWriter<'static, String, String>>,
     /// The interface index of the bridge.
     bridge_index: u32,
+    /// The name of the host-side veth interface.
+    host_veth_name: String,
 }
 
 impl<'a> Bridge<'a> {
@@ -163,6 +173,10 @@ impl driver::NetworkDriver for Bridge<'_> {
         let outbound_addr6: Option<Ipv6Addr> =
             parse_option(&self.info.network.options, OPTION_OUTBOUND_ADDR6)?;
 
+        let snat_ipv4 = opts.snat_ipv4.unwrap_or(true);
+        let snat_ipv6 = opts.snat_ipv6.unwrap_or(true);
+        let bandwidth = opts.bandwidth;
+
         self.data = Some(InternalData {
             bridge_interface_name: bridge_name,
             container_interface_name: self.info.per_network_opts.interface_name.clone(),
@@ -178,6 +192,9 @@ impl driver::NetworkDriver for Bridge<'_> {
             vlan,
             outbound_addr4,
             outbound_addr6,
+            snat_ipv4,
+            snat_ipv6,
+            bandwidth,
         });
         Ok(())
     }
@@ -207,6 +224,7 @@ impl driver::NetworkDriver for Bridge<'_> {
             mac_address: container_veth_mac,
             sysctl_writer,
             bridge_index,
+            host_veth_name,
         } = create_interfaces(
             host_sock,
             netns_sock,
@@ -216,6 +234,10 @@ impl driver::NetworkDriver for Bridge<'_> {
             self.info.netns_host,
             self.info.netns_container,
         )?;
+
+        if let Some(bw) = &data.bandwidth {
+            super::tc::apply_bandwidth_limit(&host_veth_name, bw)?;
+        }
 
         //  StatusBlock response
         let mut response = types::StatusBlock {
@@ -459,6 +481,8 @@ impl<'a> Bridge<'a> {
         bridge_name: String,
         outbound_addr4: Option<Ipv4Addr>,
         outbound_addr6: Option<Ipv6Addr>,
+        snat_ipv4: bool,
+        snat_ipv6: bool,
     ) -> NetavarkResult<(SetupNetwork, PortForwardConfig<'a>)> {
         let id_network_hash =
             CoreUtils::create_network_hash(&self.info.network.name, MAX_HASH_SIZE);
@@ -476,6 +500,8 @@ impl<'a> Bridge<'a> {
             dns_port: self.info.dns_port,
             outbound_addr4,
             outbound_addr6,
+            snat_ipv4,
+            snat_ipv6,
         };
 
         let mut has_ipv4 = false;
@@ -529,6 +555,8 @@ impl<'a> Bridge<'a> {
             data.bridge_interface_name.clone(),
             data.outbound_addr4,
             data.outbound_addr6,
+            data.snat_ipv4,
+            data.snat_ipv6,
         )?;
 
         if !self.info.rootless {
@@ -833,7 +861,7 @@ fn create_interfaces(
         },
     };
 
-    let mac = create_veth_pair(
+    let (mac, host_veth_name) = create_veth_pair(
         host,
         netns,
         data,
@@ -848,6 +876,7 @@ fn create_interfaces(
         mac_address: mac,
         sysctl_writer,
         bridge_index,
+        host_veth_name,
     })
 }
 
@@ -863,7 +892,7 @@ fn create_veth_pair<'fd>(
     hostns_fd: BorrowedFd<'fd>,
     netns_fd: BorrowedFd<'fd>,
     mtu: u32,
-) -> NetavarkResult<String> {
+) -> NetavarkResult<(String, String)> {
     let mut peer_opts =
         CreateLinkOptions::new(data.container_interface_name.to_string(), InfoKind::Veth);
     peer_opts.mac = data.mac_address.clone().unwrap_or_default();
@@ -918,6 +947,20 @@ fn create_veth_pair<'fd>(
         ));
     }
 
+    let host_veth = host.get_link(LinkID::ID(host_link))?;
+    let mut host_veth_name = String::from("");
+    for nla in host_veth.attributes.iter() {
+        if let LinkAttribute::IfName(name) = nla {
+            host_veth_name = name.clone();
+            break;
+        }
+    }
+    if host_veth_name.is_empty() {
+        return Err(NetavarkError::Message(
+            "failed to get the name of the host veth interface".to_string(),
+        ));
+    }
+
     if let Some(vid) = data.vlan {
         host.set_vlan_id(
             host_link,
@@ -950,16 +993,9 @@ fn create_veth_pair<'fd>(
         })?;
 
         if data.ipam.ipv6_enabled {
-            let host_veth = host.get_link(LinkID::ID(host_link))?;
-
-            for nla in host_veth.attributes.into_iter() {
-                if let LinkAttribute::IfName(name) = nla {
-                    //  Disable dad inside on the host too
-                    let disable_dad_in_container = format!("net/ipv6/conf/{name}/accept_dad");
-                    sysctl::apply_sysctl_value(disable_dad_in_container, "0")?;
-                    break;
-                }
-            }
+            //  Disable dad inside on the host too
+            let disable_dad_in_container = format!("net/ipv6/conf/{host_veth_name}/accept_dad");
+            sysctl::apply_sysctl_value(disable_dad_in_container, "0")?;
         }
     }
 
@@ -999,7 +1035,7 @@ fn create_veth_pair<'fd>(
         netns.add_route(route)?
     }
 
-    Ok(mac)
+    Ok((mac, host_veth_name))
 }
 
 /// Make sure the LinkMessage is of type bridge and if vlan is set also checks
@@ -1201,6 +1237,23 @@ pub fn parse_bridge_opts(
     let no_default_route = parse_option(opts, OPTION_NO_DEFAULT_ROUTE)?;
     let vrf = parse_option(opts, OPTION_VRF)?;
     let vlan = parse_option(opts, OPTION_VLAN)?;
+    let snat_ipv4 = parse_option(opts, OPTION_SNAT_IPV4)?;
+    let snat_ipv6 = parse_option(opts, OPTION_SNAT_IPV6)?;
+    let bw_rate = parse_option(opts, OPTION_BANDWIDTH_RATE)?;
+    let bw_burst = parse_option(opts, OPTION_BANDWIDTH_BURST)?;
+    let bw_latency = parse_option(opts, OPTION_BANDWIDTH_LATENCY)?;
+
+    let bandwidth = if let (Some(rate), Some(burst), Some(latency)) = (bw_rate, bw_burst, bw_latency)
+    {
+        Some(types::BandwidthOptions {
+            rate,
+            burst,
+            latency,
+        })
+    } else {
+        None
+    };
+
     if vlan.is_some() && vlan.unwrap() > 4094 {
         return Err(NetavarkError::msg(
             "vlan must be between 0 and 4094".to_string(),
@@ -1214,6 +1267,9 @@ pub fn parse_bridge_opts(
         no_default_route,
         vrf,
         vlan,
+        snat_ipv4,
+        snat_ipv6,
+        bandwidth,
     })
 }
 
@@ -1225,4 +1281,7 @@ pub struct BridgeOptions {
     pub no_default_route: Option<bool>,
     pub vrf: Option<String>,
     pub vlan: Option<u16>,
+    pub snat_ipv4: Option<bool>,
+    pub snat_ipv6: Option<bool>,
+    pub bandwidth: Option<types::BandwidthOptions>,
 }

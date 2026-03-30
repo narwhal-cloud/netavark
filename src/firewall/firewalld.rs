@@ -49,8 +49,17 @@ impl firewall::FirewallDriver for FirewallD {
                 ))
             }
         };
+
+        let enable_masquerade = network_setup.snat_ipv4 || network_setup.snat_ipv6;
+
         need_reload |= match add_policy_if_not_exist(
-            &self.conn, POLICYNAME, ZONENAME, "ANY", "ACCEPT", true, None,
+            &self.conn,
+            POLICYNAME,
+            ZONENAME,
+            "ANY",
+            "ACCEPT",
+            enable_masquerade,
+            None,
         ) {
             Ok(b) => b,
             Err(e) => {
