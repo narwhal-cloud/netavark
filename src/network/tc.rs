@@ -5,6 +5,16 @@ use std::process::{Command, Stdio};
 
 /// apply_bandwidth_limit applies bandwidth limits to a network interface using tc-tbf.
 pub fn apply_bandwidth_limit(iface: &str, bw: &BandwidthOptions) -> NetavarkResult<()> {
+    if bw.rate == 0 {
+        return Err(NetavarkError::msg("bandwidth_rate must be greater than 0"));
+    }
+    if bw.burst == 0 {
+        return Err(NetavarkError::msg("bandwidth_burst must be greater than 0"));
+    }
+    if bw.latency == 0 {
+        return Err(NetavarkError::msg("bandwidth_latency must be greater than 0"));
+    }
+
     debug!("Applying bandwidth limit to {}: {:?}", iface, bw);
 
     // 1. Delete existing qdisc (it might not exist, so we ignore errors)

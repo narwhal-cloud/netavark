@@ -587,55 +587,81 @@ impl<'a> Bridge<'a> {
         // "borrow later used" problems
         let (container_addresses, nameservers);
 
-        let (container_addresses_ref, nameservers_ref, isolate, outbound_addr4, outbound_addr6) =
-            match &self.data {
-                Some(d) => (
-                    &d.ipam.container_addresses,
-                    &d.ipam.nameservers,
-                    d.isolate,
-                    d.outbound_addr4,
-                    d.outbound_addr6,
-                ),
-                None => {
-                    let isolate =
-                        get_isolate_option(&self.info.network.options).unwrap_or_else(|e| {
-                            // just log we still try to do as much as possible for cleanup
-                            error!("failed to parse {OPTION_ISOLATE} option: {e}");
-                            IsolateOption::Never
+        let (
+            container_addresses_ref,
+            nameservers_ref,
+            isolate,
+            outbound_addr4,
+            outbound_addr6,
+            snat_ipv4,
+            snat_ipv6,
+        ) = match &self.data {
+            Some(d) => (
+                &d.ipam.container_addresses,
+                &d.ipam.nameservers,
+                d.isolate,
+                d.outbound_addr4,
+                d.outbound_addr6,
+                d.snat_ipv4,
+                d.snat_ipv6,
+            ),
+            None => {
+                let isolate =
+                    get_isolate_option(&self.info.network.options).unwrap_or_else(|e| {
+                        // just log we still try to do as much as possible for cleanup
+                        error!("failed to parse {OPTION_ISOLATE} option: {e}");
+                        IsolateOption::Never
+                    });
+
+                // Parse outbound addresses for teardown case
+                let outbound_addr4 =
+                    parse_option::<Ipv4Addr>(&self.info.network.options, OPTION_OUTBOUND_ADDR4)
+                        .unwrap_or_else(|e| {
+                            error!("failed to parse {OPTION_OUTBOUND_ADDR4} option: {e}");
+                            None
+                        });
+                let outbound_addr6 =
+                    parse_option::<Ipv6Addr>(&self.info.network.options, OPTION_OUTBOUND_ADDR6)
+                        .unwrap_or_else(|e| {
+                            error!("failed to parse {OPTION_OUTBOUND_ADDR6} option: {e}");
+                            None
                         });
 
-                    // Parse outbound addresses for teardown case
-                    let outbound_addr4 =
-                        parse_option::<Ipv4Addr>(&self.info.network.options, OPTION_OUTBOUND_ADDR4)
-                            .unwrap_or_else(|e| {
-                                error!("failed to parse {OPTION_OUTBOUND_ADDR4} option: {e}");
-                                None
-                            });
-                    let outbound_addr6 =
-                        parse_option::<Ipv6Addr>(&self.info.network.options, OPTION_OUTBOUND_ADDR6)
-                            .unwrap_or_else(|e| {
-                                error!("failed to parse {OPTION_OUTBOUND_ADDR6} option: {e}");
-                                None
-                            });
+                let snat_ipv4 =
+                    parse_option::<bool>(&self.info.network.options, OPTION_SNAT_IPV4)
+                        .unwrap_or_else(|e| {
+                            error!("failed to parse {OPTION_SNAT_IPV4} option: {e}");
+                            None
+                        })
+                        .unwrap_or(true);
+                let snat_ipv6 =
+                    parse_option::<bool>(&self.info.network.options, OPTION_SNAT_IPV6)
+                        .unwrap_or_else(|e| {
+                            error!("failed to parse {OPTION_SNAT_IPV6} option: {e}");
+                            None
+                        })
+                        .unwrap_or(true);
 
-                    (container_addresses, nameservers) =
-                        match get_ipam_addresses(self.info.per_network_opts, self.info.network) {
-                            Ok(i) => (i.container_addresses, i.nameservers),
-                            Err(e) => {
-                                // just log we still try to do as much as possible for cleanup
-                                error!("failed to parse ipam options: {e}");
-                                (Vec::new(), Vec::new())
-                            }
-                        };
-                    (
-                        &container_addresses,
-                        &nameservers,
-                        isolate,
-                        outbound_addr4,
-                        outbound_addr6,
-                    )
-                }
-            };
+                (container_addresses, nameservers) =
+                    match get_ipam_addresses(self.info.per_network_opts, self.info.network) {
+                        Ok(i) => (i.container_addresses, i.nameservers),
+                        Err(e) => {
+                            // just log we still try to do as much as possible for cleanup
+                            error!("failed to parse ipam options: {e}");
+                            (Vec::new(), Vec::new())
+                        }
+                    };
+                (
+                    &container_addresses,
+                    &nameservers,
+                    isolate,
+                    outbound_addr4,
+                    outbound_addr6,
+                    snat_ipv4,
+                    snat_ipv6,
+                )
+            }
+        };
 
         let (sn, spf) = self.get_firewall_conf(
             container_addresses_ref,
@@ -644,6 +670,8 @@ impl<'a> Bridge<'a> {
             bridge_name,
             outbound_addr4,
             outbound_addr6,
+            snat_ipv4,
+            snat_ipv6,
         )?;
 
         let tn = TearDownNetwork {
