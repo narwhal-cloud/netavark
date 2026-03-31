@@ -175,7 +175,17 @@ impl driver::NetworkDriver for Bridge<'_> {
 
         let snat_ipv4 = opts.snat_ipv4.unwrap_or(true);
         let snat_ipv6 = opts.snat_ipv6.unwrap_or(true);
-        let bandwidth = opts.bandwidth;
+
+        // Bandwidth options are per-container: read from per_network_opts so that
+        // each container can have its own limit via --network name:bandwidth_rate=N,...
+        let bw_rate = parse_option::<u64>(&self.info.per_network_opts.options, OPTION_BANDWIDTH_RATE)?;
+        let bw_burst = parse_option::<u64>(&self.info.per_network_opts.options, OPTION_BANDWIDTH_BURST)?;
+        let bw_latency = parse_option::<u64>(&self.info.per_network_opts.options, OPTION_BANDWIDTH_LATENCY)?;
+        let bandwidth = if let (Some(rate), Some(burst), Some(latency)) = (bw_rate, bw_burst, bw_latency) {
+            Some(types::BandwidthOptions { rate, burst, latency })
+        } else {
+            None
+        };
 
         self.data = Some(InternalData {
             bridge_interface_name: bridge_name,
